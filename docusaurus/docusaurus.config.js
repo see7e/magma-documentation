@@ -53,8 +53,8 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
-      // Replace with your project's social card
-      image: 'img/docusaurus-social-card.jpg',
+      // Replace with your project's social card at /docusaurus/static/img/
+      // image: 'img/docusaurus-social-card.jpg',
       navbar: {
         title: 'Magma',
         logo: {
