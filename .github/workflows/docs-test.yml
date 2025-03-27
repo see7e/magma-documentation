@@ -22,26 +22,27 @@ on:
     branches: [ main ]
 
 jobs:
-  path_filter:
-    runs-on: ubuntu-latest
-    outputs:
-      docs_changed: ${{ steps.filter.outputs.docs }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            docs:
-              paths:
-                - 'docs/**'
-                - 'readmes/**'
-                - '.github/workflows/docs-*.yml'
+  # path_filter:
+  #   runs-on: ubuntu-latest
+  #   outputs:
+  #     docs_changed: ${{ steps.filter.outputs.docs }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dorny/paths-filter@v3
+  #       id: filter
+  #       with:
+  #         filters: |
+  #           docs:
+  #             paths:
+  #               - 'docs/**'
+  #               - 'readmes/**'
+  #               - '.github/workflows/docs-*.yml'
 
   docusaurus-test:
     name: Docusaurus Build & Log
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    # needs: path_filter
+    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,8 +81,9 @@ jobs:
 
   translation-consistency:
     name: Translation Consistency Check
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    # needs: path_filter
+    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -93,8 +95,9 @@ jobs:
 
   id-filename-sync:
     name: Docusaurus ID & Filename Sync
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    # needs: path_filter
+    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -106,8 +109,9 @@ jobs:
 
   check-symlinks:
     name: Broken Symlinks
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    # needs: path_filter
+    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -125,8 +129,9 @@ jobs:
 
   markdown-link-check:
     name: Markdown URL Check
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    # needs: path_filter
+    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
