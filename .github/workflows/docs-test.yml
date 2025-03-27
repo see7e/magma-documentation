@@ -22,27 +22,8 @@ on:
     branches: [ main ]
 
 jobs:
-  # path_filter:
-  #   runs-on: ubuntu-latest
-  #   outputs:
-  #     docs_changed: ${{ steps.filter.outputs.docs }}
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: dorny/paths-filter@v3
-  #       id: filter
-  #       with:
-  #         filters: |
-  #           docs:
-  #             paths:
-  #               - 'docs/**'
-  #               - 'readmes/**'
-  #               - '.github/workflows/docs-*.yml'
-
   docusaurus-test:
     name: Docusaurus Build & Log
-    # needs: path_filter
-    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +50,6 @@ jobs:
 
   markdown-lint:
     name: Markdown Format Check
-    needs: path_filter
-    if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,37 +60,24 @@ jobs:
 
   translation-consistency:
     name: Translation Consistency Check
-    # needs: path_filter
-    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Check translation consistency
-        # TODO
         run: ./.github/workflows/scripts/check_translations.sh
-
-######
 
   id-filename-sync:
     name: Docusaurus ID & Filename Sync
-    # needs: path_filter
-    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check ID matches filename
-        # TODO
         run: |
           echo "Checking Docusaurus ID vs filename..."
           ./.github/workflows/scripts/check_id_matches_filename.sh
 
   check-symlinks:
     name: Broken Symlinks
-    # needs: path_filter
-    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,14 +90,11 @@ jobs:
             echo "$BROKEN"
             exit 1
           else
-            echo \"✅ No broken symlinks found in ./docusaurus.\"
+            echo "✅ No broken symlinks found in ./docusaurus."
           fi
 
   markdown-link-check:
     name: Markdown URL Check
-    # needs: path_filter
-    # if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
