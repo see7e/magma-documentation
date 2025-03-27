@@ -10,7 +10,7 @@
 # limitations under the License.
 
 # owner: @magma/approvers-infra
-# purpose: Check the documentation changes for issues and formating errors
+# purpose: Check the documentation changes for issues and formatting errors
 # remediation: 
 ---
 name: Docs Check
@@ -33,9 +33,10 @@ jobs:
         with:
           filters: |
             docs:
-              - 'docs/**'
-              - 'readmes/**'
-              - '.github/workflows/docs-*.yml'
+              paths:
+                - 'docs/**'
+                - 'readmes/**'
+                - '.github/workflows/docs-*.yml'
 
   docusaurus-test:
     name: Docusaurus Build & Log
@@ -72,8 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run precommit lint
-        run: make -C readmes precommit
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+      - name: Run markdownlint
+        run: markdownlint "docs/**/*.md" "readmes/**/*.md"
 
   translation-consistency:
     name: Translation Consistency Check
@@ -84,7 +87,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Check translation consistency
         # TODO
-        run: ./.github/workflows/scripts/docs/check_translations.sh
+        run: ./.github/workflows/scripts/check_translations.sh
 
 ######
 
@@ -99,21 +102,26 @@ jobs:
         # TODO
         run: |
           echo "Checking Docusaurus ID vs filename..."
-          ./.github/workflows/scripts/docs/check_id_matches_filename.sh
+          ./.github/workflows/scripts/check_id_matches_filename.sh
 
   check-symlinks:
     name: Broken Symlinks
     needs: path_filter
     if: ${{ needs.path_filter.outputs.docs_changed == 'true' }}
     runs-on: ubuntu-latest
-    env:
-      MAGMA_ROOT: "${{ github.workspace }}"
     steps:
       - uses: actions/checkout@v4
-      - name: Find broken symlinks
-        shell: bash
+      - name: Check for broken symlinks in docusaurus/
+        working-directory: ${{ github.workspace }}/docusaurus
         run: |
-          make -C ${MAGMA_ROOT}/docs sidebar_check
+          BROKEN=$(find . -xtype l)
+          if [ -n "$BROKEN" ]; then
+            echo "❌ Broken symlinks found:"
+            echo "$BROKEN"
+            exit 1
+          else
+            echo \"✅ No broken symlinks found in ./docusaurus.\"
+          fi
 
   markdown-link-check:
     name: Markdown URL Check
@@ -126,4 +134,4 @@ jobs:
         with:
           use-verbose-mode: 'yes'
           config-file: '.github/workflows/config/markdown_link_check_config.json'
-          folder-path: './docs'
+          folder-path: './docusaurus/docs'
