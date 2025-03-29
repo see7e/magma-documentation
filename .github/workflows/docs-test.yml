@@ -62,11 +62,13 @@ jobs:
     name: Translation Consistency Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Grant execute permissions to scripts
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Grant execute permissions
         run: chmod +x ./.github/workflows/scripts/*.sh
       - name: Check translation consistency
-        run: ./.github/workflows/scripts/check_translations.sh
+        run: ./.github/workflows/scripts/check_translations.sh --debug
 
   id-filename-sync:
     name: Docusaurus ID & Filename Sync
@@ -78,7 +80,7 @@ jobs:
       - name: Check ID matches filename
         run: |
           echo "Checking Docusaurus ID vs filename..."
-          ./.github/workflows/scripts/check_id_matches_filename.sh
+          ./.github/workflows/scripts/check_id_matches_filename.sh --debug
 
   check-symlinks:
     name: Broken Symlinks
