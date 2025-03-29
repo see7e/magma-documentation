@@ -63,6 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Grant execute permissions to scripts
+        run: chmod +x ./.github/workflows/scripts/*.sh
       - name: Check translation consistency
         run: ./.github/workflows/scripts/check_translations.sh
 
@@ -71,6 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Grant execute permissions to scripts
+        run: chmod +x ./.github/workflows/scripts/*.sh
       - name: Check ID matches filename
         run: |
           echo "Checking Docusaurus ID vs filename..."
