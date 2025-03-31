@@ -23,7 +23,8 @@ fi
 
 # Get modified files or all files based on debug mode
 if [ "$DEBUG_MODE" = "true" ]; then
-    MODIFIED_DOCS=$(find ../../../docusaurus/docs/ -type f \( -name "*.md" -o -name "*.mdx" \) ! -path "versioned_docs/*")
+    cd docusaurus/docs
+    MODIFIED_DOCS=$(find . -type f \( -name "*.md" -o -name "*.mdx" \) ! -path "versioned_docs/*")
 else
     BASE_REF="${GITHUB_BASE_REF:-origin/main}"
     MODIFIED_DOCS=$(git diff --name-only "$BASE_REF...HEAD" -- 'docs/**/*.md' 'docs/**/*.mdx' ':!versioned_docs/**')
