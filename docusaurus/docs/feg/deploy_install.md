@@ -1,26 +1,28 @@
 ---
-id: version-1.0.0-deploy_install
-title: Installing Federation Gateway
+id: deploy_install
+title: Install FeG
 hide_title: true
-original_id: deploy_install
 ---
-# Installing Federation Gateway
+
+# Install Federation Gateway
 
 ## Prerequisites
 
 To install the Federation Gateway, there are three required files that are
 deployment-specific. These are described below:
 
-* `rootCA.pem` - This file should match the `rootCA.pem` of the Orchestrator
+- `rootCA.pem` - This file should match the `rootCA.pem` of the Orchestrator
 that the Federation Gateway will connect to.
 
-* `control_proxy.yml` - This file is used to configure the `magmad`
+- `control_proxy.yml` - This file is used to configure the `magmad`
 and `control_proxy` services to point toward the appropriate Orchestrator.
 A sample configuration is provided below. The `bootstrap_address`,
 `bootstrap_port`, `controller_address`, and `controller_port` are the
-parameters that will likely need to be modified.
- 
-```
+parameters that will likely need to be modified (check
+  `/magma/feg/gateway/configs/control_proxy.yml` for the most recent
+  format)
+
+```yaml
 #
 # Copyright 2020 The Magma Authors.
 
@@ -60,11 +62,12 @@ proxy_cloud_connections: True
 allow_http_proxy: True
 ```
 
-* `.env` - This file provides any deployment specific environment variables used
+- `.env` - This file provides any deployment specific environment variables used
 in the `docker-compose.yml` of the Federation Gateway. A sample configuration
-is provided below:
+is provided below (please check `magma/feg/gateway/docker/.env` for the most
+  recent format):
 
-```
+```yaml
 # Copyright 2020 The Magma Authors.
 
 # This source code is licensed under the BSD-style license found in the
@@ -81,10 +84,13 @@ DOCKER_REGISTRY=<registry>
 DOCKER_USERNAME=<username>
 DOCKER_PASSWORD=<password>
 IMAGE_VERSION=latest
+GIT_HASH=master
 
 ROOTCA_PATH=/var/opt/magma/certs/rootCA.pem
 CONTROL_PROXY_PATH=/etc/magma/control_proxy.yml
 SNOWFLAKE_PATH=/etc/snowflake
+CONFIGS_DEFAULT_VOLUME=/etc/magma
+CONFIGS_TEMPLATES_PATH=/etc/magma/templates
 
 CERTS_VOLUME=/var/opt/magma/certs
 CONFIGS_VOLUME=/var/opt/magma/configs
@@ -125,29 +131,27 @@ After installation, the next step is to register the gateway with the Orchestrat
 To do so:
 
 ```console
-INSTALL_HOST [~/]$ cd /var/opt/magma/docker
-INSTALL_HOST [/var/opt/magma/docker]$ docker-compose exec magmad /usr/local/bin/show_gateway_info.py
+INSTALL_HOST [~/]$ docker compose exec magmad /usr/local/bin/show_gateway_info.py
 ```
 
 This will output a hardware ID and a challenge key. This information must be
 registered with the Orchestrator. At this time, NMS support for FeG
 registration is still in-progress.
 
-To register the FeG, go to the Orchestrator's APIdocs in your browser. 
-**Note: It is highly encouraged to use V1 of the apidocs**
-(i.e. https://controller.url.sample:9443/apidocs/v1/).
+To register the FeG, go to the Orchestrator's Swagger UI in your browser.
+(i.e. <https://controller.url.sample:9443/swagger/v1/ui/>).
 
 Now, create a Federation Network. This is found at `/feg` under the
-**Federation Networks** section. Then register the gateway under the
-**Federation Gateway** section at `/feg/{network_id}/gateways` using the 
-network ID of the Federation Network and the hardware ID and challenge key 
+**Federation Networks** section. If you have not registered any gateways before, you
+must set up a tier under the **Orchestrator** section at `/networks/{network_id}/tiers`.
+Then register the gateway under the **Federation Gateway** section at `/feg/{network_id}/gateways`
+using the network ID of the Federation Network and the hardware ID and challenge key
 from the previous step.
 
 To verify that the gateway was correctly registered, run:
 
 ```console
-INSTALL_HOST [~/]$ cd /var/opt/magma/docker
-INSTALL_HOST [/var/opt/magma/docker]$ docker-compose exec magmad /usr/local/bin/checkin_cli.py
+INSTALL_HOST [~/]$ docker compose exec magmad /usr/local/bin/checkin_cli.py
 ```
 
 ## Upgrades

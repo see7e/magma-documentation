@@ -1,505 +1,385 @@
 ---
-id: version-1.0.0-deploy_install
-title: Installing Orchestrator
+id: deploy_install
+title: Install Orchestrator
 hide_title: true
-original_id: deploy_install
 ---
-# Installing Orchestrator
 
-## Creating Secrets
+# Install Orchestrator
 
-IMPORTANT: in all the below instructions, replace `yourdomain.com` with the
-actual domain/subdomain which you've chosen to host Orchestrator on.
+This page walks through a full, vanilla Orchestrator install.
 
-We recommend storing the following secrets on S3 in AWS, or any similar
-object storage service on your preferred cloud provider.
+If you want to install a specific release version, see the notes in the
+[deployment intro](./deploy_intro.md).
 
-Start first by creating a new directory somewhere to hold the secrets while
-you create them:
+## Prerequisites
 
-```bash
-mkdir -p ~/secrets/
-```
+We assume `MAGMA_ROOT` is set as described in the
+[deployment intro](./deploy_intro.md).
 
-### SSL Certificates
+This walkthrough assumes you already have the following
 
-You will need the following certificates and private keys:
+- a registered domain name
+- a blank AWS account
+- an AWS credential with admin permissions
 
-1. The public SSL certificate for your Orchestrator domain,
-with CN=*.yourdomain.com. This can be an SSL certificate chain, but it must be
-in one file
-2. The private key which corresponds to the above SSL certificate
-3. The rootCA certificate which verifies your SSL certificate.
+If your AWS account is not blank, this can cause errors while Terraforming.
+If you know what you're doing, this is fine - otherwise, consider signing up
+for a new account.
 
-If you already have these files, you can do the following:
+Finally, our install process assumes the chosen region contains at least 3
+availability zones. This should be the case for all major regions.
 
-1. Rename your public SSL certificate to `controller.crt`
-2. Rename your SSL certificate's private key to `controller.key`
-3. Rename your SSL certificate's root CA to `rootCA.pem`
-4. Put these 3 files under a subdirectory `certs`
+## Assemble Certificates
 
-If you aren't worried about a browser warning, you can also self-sign these
-certs. Change the values of the DN prompts as necessary, but pay *very* close
-attention to the common names - these are very important to get right!
+Before Terraforming specific resources, we'll assemble the relevant
+certificates.
+
+First, create a local directory to hold the certificates you will use for
+your Orchestrator deployment. These certificates will be uploaded to AWS
+Secrets Manager and you can delete them locally afterwards.
 
 ```bash
-$ mkdir -p ~/secrets/certs
-$ cd ~/secrets/certs
-$ openssl genrsa -out rootCA.key 2048
-
-Generating RSA private key, 2048 bit long modulus
-
-$ openssl req -x509 -new -nodes -key rootCA.key -sha256 -days 3650 -out rootCA.pem
-
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) []:US
-State or Province Name (full name) []:CA
-Locality Name (eg, city) []:Menlo Park
-Organization Name (eg, company) []:Facebook
-Organizational Unit Name (eg, section) []:Magma
-Common Name (eg, fully qualified host name) []:rootca.yourdomain.com
-Email Address []:admin@yourdomain.com
-
-$ openssl genrsa -out controller.key 2048
-
-Generating RSA private key, 2048 bit long modulus
-
-$ openssl req -new -key controller.key -out controller.csr
-
-You are about to be asked to enter information that will be incorporated
-into your certificate request.
-What you are about to enter is what is called a Distinguished Name or a DN.
-There are quite a few fields but you can leave some blank
-For some fields there will be a default value,
-If you enter '.', the field will be left blank.
------
-Country Name (2 letter code) []:US
-State or Province Name (full name) []:CA
-Locality Name (eg, city) []:Menlo Park
-Organization Name (eg, company) []:Facebook
-Organizational Unit Name (eg, section) []:Magma
-Common Name (eg, fully qualified host name) []:*.yourdomain.com
-Email Address []:admin@yourdomain.com
-
-Please enter the following 'extra' attributes
-to be sent with your certificate request
-A challenge password []:
-
-$ openssl x509 -req -in controller.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial -out controller.crt -days 365 -sha256
-
-Signature ok
-subject=/C=US/ST=CA/L=Menlo Park/O=Facebook/OU=Magma/CN=*.yourdomain.com/emailAddress=admin@yourdomain.com
-Getting CA Private Key
-
-$ rm controller.csr rootCA.srl
+mkdir -p ~/secrets/certs
+cd ~/secrets/certs
 ```
 
-At this point, regardless of whether you self-signed your certs or acquired
-them from a certificate provider, your `certs` subdirectory should look like
-this:
+You will need the following 3 certs
+
+1. TLS certificate
+   - CN: `yourdomain.com`
+   - SANs
+        - `yourdomain.com`
+        - `*.yourdomain.com`
+        - `*.nms.yourdomain.com`
+2. TLS certificate's private key
+3. TLS certificate's root CA certificate (which signed `controller.crt`)
+
+If you aren't worried about a browser warning, you can generate self-signed
+certs. Though please note that using trusted certs in production deployments
+is encouraged
 
 ```bash
-$ ls
-controller.crt  controller.key  rootCA.pem    rootCA.key
+${MAGMA_ROOT}/orc8r/cloud/deploy/scripts/self_sign_certs.sh yourdomain.com
 ```
 
-We *strongly* recommend moving `rootCA.key` to a more secure location at this
-point. By default, the Helm chart for secrets will below will upload it to EKS
-as a Kubernetes secret and mount it to controller pods. If the private key
-portion of the root CA is compromised, all TLS traffic to and from your cluster
-will be compromised.
+Alternatively, if you already have these certs, rename and move them as follows
 
-Keep rootCA.key in a place where you can access it again - you will need it to
-renew the SSL certificate for the Orchestrator controller when it expires.
+1. Rename your public TLS certificate to `controller.crt`
+2. Rename your TLS certificate's private key to `controller.key`
+3. Rename your TLS certificate's root CA certificate to `rootCA.pem`
+4. Put these three files under the directory you created above
 
-### Application Certificates and Keys
-
-`certifier` is the Orchestrator service which signs client certificates. All
-access to Orchestrator is authenticated by client SSL certificates, so you'll
-need to create the verifying certificate for `certifier`.
-
-Again, pay *very* close attention to the CN.
+Next, with the domain certs placed in the correct directory, generate the
+application certs
 
 ```bash
-$ openssl genrsa -out certifier.key 2048
-
-Generating RSA private key, 2048 bit long modulus
-
-$ openssl req -x509 -new -nodes -key certifier.key -sha256 -days 3650 -out certifier.pem
-
-...
-Common Name (eg, fully qualified host name) []:certifier.yourdomain.com
-
-$ openssl genrsa -out bootstrapper.key 2048
-
-Generating RSA private key, 2048 bit long modulus
-
-$ ls
-bootstrapper.key  certifier.key     certifier.pem     controller.crt    controller.key    rootCA.pem    rootCA.key
+${MAGMA_ROOT}/orc8r/cloud/deploy/scripts/create_application_certs.sh yourdomain.com
 ```
 
-The last command created a private key for the `bootstrapper` service, which
-is the mechanism by which Access Gateways acquire their client certificates
-from `certifier`.
+NOTE: `yourdomain.com` above should match the relevant Terraform variables in
+subsequent sections. For example, if in `main.tf` the `orc8r_domain_name` is
+`orc8r.yourdomain.com`, then that same domain should be used when requesting
+or generating all the above certs.
 
-### Environment Secrets
-
-Go into the AWS management console, choose "RDS", and find the hostname of your
-orc8r RDS instance (make sure not to choose the NMS RDS instance). Note this
-down, then continue:
+Finally, create the `admin_operator.pfx` file, protected with a password of
+your choosing
 
 ```bash
-mkdir -p ~/secrets/envdir
-cd ~/secrets/envdir
-echo "STREAMER,SUBSCRIBERDB,METRICSD,CERTIFIER,BOOTSTRAPPER,METERINGD_RECORDS,ACCESSD,OBSIDIAN,DISPATCHER,DIRECTORYD" > CONTROLLER_SERVICES
-echo "dbname=orc8r user=orc8r password=<YOUR ORC8R DB PASSWORD> host=<YOUR ORC8R RDS ENDPOINT>" > DATABASE_SOURCE
-```
-
-### Static Configuration Files
-
-Orchestrator microservices can be configured with static YAML files. In this
-deployment, the only one you'll have to create will be for `metricsd`:
-
-```bash
-mkdir -p ~/secrets/configs/orc8r
-cd ~/secrets/configs/orc8r
-touch metricsd.yml
-```
-
-Put the following contents into `metricsd.yml`:
-
-```
-profile: "prometheus"
-
-prometheusQueryAddress: "http://orc8r-prometheus:9090"
-prometheusPushAddresses:
-  - "http://orc8r-prometheus-cache:9091/metrics"
-
-alertmanagerApiURL: "http://orc8r-alertmanager:9093/api/v2/alerts"
-prometheusConfigServiceURL: "http://orc8r-config-manager:9100"
-alertmanagerConfigServiceURL: "http://orc8r-config-manager:9101"
-```
-
-## Initial Helm Deploy
-
-Copy your secrets into the Helm subchart where you cloned Magma:
-
-```bash
-cp -r ~/secrets magma/orc8r/cloud/helm/orc8r/charts/secrets/.secrets
-```
-
-We need to set up the EKS cluster before we can `helm deploy` to it:
-
-```bash
-cd magma/orc8r/cloud/helm/orc8r
-kubectl apply -f tiller-rbac-config.yaml
-helm init --service-account tiller --history-max 200
-# Wait for tiller to become 'Running'
-kubectl get pods -n kube-system | grep tiller
-
-kubectl create namespace magma
-```
-
-Next, create a `vals.yml` somewhere in a source controlled directory that you
-own (e.g. adjacent to your terraform scripts). Fill in the values in caps
-with the correct values for your docker registry and Orchestrator hostname:
-
-```
-imagePullSecrets:
-  - name: orc8r-secrets-registry
-
-secrets:
-  create: true
-  docker:
-    registry: YOUR-DOCKER-REGISTRY
-    username: YOUR-DOCKER-USERNAME
-    password: YOUR-DOCKER-PASSWORD
-  
-
-proxy:
-  image:
-    repository: YOUR-DOCKER-REGISTRY/proxy
-    tag: YOUR-CONTAINER-TAG
-
-  replicas: 2
-
-  service:
-    name: orc8r-bootstrap-legacy
-    type: LoadBalancer
-
-  spec:
-    hostname: controller.YOURDOMAIN.COM
-
-  nodeSelector:
-    worker-type: controller
-
-controller:
-  image:
-    repository: YOUR-DOCKER-REGISTRY/controller
-    tag: YOUR-CONTAINER-TAG
-
-  replicas: 2
-
-  migration:
-    new_handlers: 1
-    new_mconfigs: 1
-
-  nodeSelector:
-    worker-type: controller
-
-metrics:
-  imagePullSecrets:
-    - name: orc8r-secrets-registry
-
-  metrics:
-    volumes:
-      prometheusData:
-        volumeSpec:
-          hostPath:
-            path: /prometheusData
-            type: DirectoryOrCreate
-      prometheusConfig:
-        volumeSpec:
-          hostPath:
-            path: /configs/prometheus
-            type: DirectoryOrCreate
-
-  prometheus:
-    create: true
-    nodeSelector:
-      worker-type: metrics
-
-  configmanager:
-    create: true
-    image:
-      repository: YOUR-DOCKER-REGISTRY/config-manager
-      tag: YOUR-CONTAINER-TAG
-    nodeSelector:
-      worker-type: metrics
-
-  alertmanager: 
-    create: true
-    nodeSelector:
-      worker-type: metrics
-
-  prometheusCache:
-    create: true
-    image:
-      repository: YOUR-DOCKER-REGISTRY/prometheus-cache
-      tag: YOUR-CONTAINER-TAG
-    limit: 500000
-    nodeSelector:
-      worker-type: metrics
-
-  grafana:
-    create: true
-    image:
-      repository: YOUR-DOCKER-REGISTRY/grafana
-      tag: YOUR-CONTAINER-TAG
-    nodeSelector:
-      worker-type: metrics
-
-nms:
-  imagePullSecrets:
-    - name: orc8r-secrets-registry
-
-  magmalte:
-    manifests:
-      secrets: false
-      deployment: false
-      service: false
-      rbac: false
-
-    image:
-      repository: YOUR-DOCKER-REGISTRY/magmalte
-      tag: YOUR-CONTAINER-TAG
-
-    env:
-      api_host: controller.YOURDOMAIN.COM
-      mysql_host: YOUR RDS MYSQL HOST
-      mysql_user: magma
-      mysql_pass: YOUR RDS MYSQL PASSWORD
-  nginx:
-    manifests:
-      configmap: false
-      secrets: false
-      deployment: false
-      service: false
-      rbac: false
-
-    service:
-      type: LoadBalancer
-
-    deployment:
-      spec:
-        ssl_cert_name: controller.crt
-        ssl_cert_key_name: controller.key
-```
-
-NMS won't work without a client certificate, so we've turned off those
-deployments for now. We'll create an admin cert and upgrade the deployment
-with NMS once the core Orchestrator components are up.
-
-At this point, if your `vals.yml` is good, you can do your first helm deploy:
-
-```bash
-cd magma/orc8r/cloud/helm/orc8r
-helm install --name orc8r --namespace magma . --values=PATH_TO_VALS/vals.yml
-```
-
-## Creating an Admin User
-
-First, find a `orc8r-controller-` pod in k8s:
-
-```bash
-$ kubectl -n magma get pods
-
-NAME                                      READY   STATUS    RESTARTS   AGE
-orc8r-configmanager-896d784bc-chqr7       1/1     Running   0          X
-orc8r-controller-7757567bf5-cm4wn         1/1     Running   0          X
-orc8r-controller-7757567bf5-jshpv         1/1     Running   0          X
-orc8r-alertmanager-c8dc7cdb5-crzpl        1/1     Running   0          X
-orc8r-grafana-6446b97885-ck6g8            1/1     Running   0          X
-orc8r-prometheus-6c67bcc9d8-6lx22         1/1     Running   0          X
-orc8r-prometheus-cache-6bf7648446-9t9hx   1/1     Running   0          X
-orc8r-proxy-57cf989fcc-cg54z              1/1     Running   0          X
-orc8r-proxy-57cf989fcc-xn2cw              1/1     Running   0          X
-```
-
-Then:
-
-```bash
-export CNTLR_POD=$(kubectl -n magma get pod -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -it ${CNTLR_POD} bash
-
-# The following commands are to be run inside the pod
-(pod)$ cd /var/opt/magma/bin
-(pod)$ envdir /var/opt/magma/envdir ./accessc add-admin -cert admin_operator admin_operator
-(pod)$ openssl pkcs12 -export -out admin_operator.pfx -inkey admin_operator.key.pem -in admin_operator.pem
+$ openssl pkcs12 -export -inkey admin_operator.key.pem -in admin_operator.pem -out admin_operator.pfx
 
 Enter Export Password:
 Verifying - Enter Export Password:
-
-(pod)$ exit
-```
-
-Now on your host, copy down the client certificates for the admin operator we
-just created into the secrets directory:
-
-```bash
-cd ~/secrets/certs
-for certfile in admin_operator.pem admin_operator.key.pem admin_operator.pfx
-do
-    kubectl -n magma cp ${CNTLR_POD}:/var/opt/magma/bin/${certfile} ./${certfile}
-done
 ```
 
 `admin_operator.pem` and `admin_operator.key.pem` are the files that NMS will
 use to authenticate itself with the Orchestrator API. `admin_operator.pfx` is
 for you to add to your keychain if you'd like to use the Orchestrator REST API
-directly (on MacOS, double-click this file and add it to your keychain).
+directly (on macOS, double-click the `admin_operator.pfx` file and add it to
+your keychain, inputting the same password chosen above).
 
-## Deploying NMS
-
-Now that we've got an admin operator cert, we can deploy NMS. Edit the
-`vals.yml` from above, and change the `nms` section to the following:
-
-```
-nms:
-  imagePullSecrets:
-    - name: orc8r-secrets-registry
-
-  magmalte:
-    manifests:
-      secrets: true
-      deployment: true
-      service: true
-      rbac: false
-
-    image:
-      repository: YOUR-DOCKER-REGISTRY/magmalte
-      tag: YOUR-CONTAINER-TAG
-
-    env:
-      api_host: controller.YOURDOMAIN.COM
-      mysql_host: YOUR RDS MYSQL HOST
-      mysql_user: magma
-      mysql_pass: YOUR RDS MYSQL PASSWORD
-  nginx:
-    manifests:
-      configmap: true
-      secrets: true
-      deployment: true
-      service: true
-      rbac: false
-
-    service:
-      type: LoadBalancer
-
-    deployment:
-      spec:
-        ssl_cert_name: controller.crt
-        ssl_cert_key_name: controller.key
-```
-
-You'll just flip all the `manifests` keys to `true` except `rbac`.
-
-Next, copy your `secrets` directory back to the chart (to pick up the admin
-certificate), and upload to to S3 (this step is optional, but you should have
-some story for where you're storing these).
+The certs directory should now look like this
 
 ```bash
-rm -r magma/orc8r/cloud/helm/orc8r/charts/secrets/.secrets
-cp -r ~/secrets magma/orc8r/cloud/helm/orc8r/charts/secrets/.secrets
-aws s3 cp magma/orc8r/helm/orc8r/charts/secrets/.secrets s3://your-bucket --recursive
-# Delete the local secrets after you've uploaded them
-rm -r ~/secrets
+$ ls -1 ~/secrets/certs/
+
+admin_operator.key.pem
+admin_operator.pem
+admin_operator.pfx
+bootstrapper.key
+certifier.key
+certifier.pem
+controller.crt
+controller.key
+fluentd.key
+fluentd.pem
+rootCA.pem
+rootCA.key
 ```
 
-We can upgrade the Helm deployment to include NMS components now:
+## Install Orchestrator
+
+With the relevant certificates assembled, we can move on to Terraforming
+the infrastructure and application.
+
+### Initialize Terraform
+
+Create a new root Terraform module in a location of your choice by creating a
+new `main.tf` file. Follow the example Terraform root module at
+`orc8r/cloud/deploy/terraform/orc8r-helm-aws/examples/basic` but make sure to
+override the following parameters
+
+- `orc8r_db_password` must be at least 8 characters
+- `orc8r_domain_name` your registered domain name
+- `seed_certs_dir` local certs directory (e.g. `"~/secrets/certs"`)
+- `orc8r_tag` tag used when you published your Orchestrator containers
+- `orc8r_deployment_type` type of orc8r deployment (`fwa`, `federated_fwa`, `all`)
+- `orc8r_db_engine_version` on fresh Orc8r installs, target Postgres `12.6`
+
+Make sure that the `source` variables for the module definitions point to
+`github.com/magma/magma//orc8r/cloud/deploy/terraform/MODULE?ref=v1.8`.
+Adjust any other parameters as you see fit. Check the READMEs for the
+relevant Terraform modules to see additional variables that can be set.
+You can [override values](./deploy_terraform_options.md#override-terraform-module-values)
+that are part of the Terraform files that are used in the GitHub repository.
+
+Finally, initialize Terraform
 
 ```bash
-cd magma/orc8r/cloud/helm/orc8r
-helm upgrade orc8r . --values=PATH_TO_VALS/vals.yml
-kubectl -n magma get pods
+$ terraform init
+
+Initializing modules...
+
+Initializing the backend...
+
+Initializing provider plugins...
+
+Terraform has been successfully initialized!
 ```
 
-Wait for the NMS pods (`nms-magmalte`, `nms-nginx-proxy`) to transition into
-`Running` state, then create a user on the NMS:
+By default, Terraform state file will be stored locally. However, you can [store the state file remotely](./deploy_terraform_options.md#store-terraform-state-in-aws) using an AWS S3 bucket.
+
+### Terraform Infrastructure
+
+The two Terraform modules are organized so that `orc8r-aws` contains all the
+resource definitions for the cloud infrastructure that you'll need to run
+Orchestrator and `orc8r-helm-aws` contains all the application components
+behind Orchestrator. On the very first installation, you'll have to
+`terraform apply` the infrastructure before the application. On later changes
+to your Terraform root module, you can make all changes at once with a single
+`terraform apply`.
+
+With your root module set up, run
 
 ```bash
-kubectl exec -it -n magma \
-  $(kubectl -n magma get pod -l app.kubernetes.io/component=magmalte -o jsonpath='{.items[0].metadata.name}') -- \
-  yarn setAdminPassword <admin user email> <admin user password>
+$ terraform apply -target=module.orc8r
+
+# NOTE: actual resource count will depend on your root module variables
+Apply complete! Resources: 70 added, 0 changed, 0 destroyed.
 ```
 
-## Upgrading the Deployment
+This `terraform apply` will create a
+[kubeconfig](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/)
+file in the same directory as your root Terraform module. To access the
+K8s cluster, either set your KUBECONFIG environment variable to point to this
+file or pull this file into your default kubeconfig file at `~/.kube/config`.
 
-We recommend an upgrade procedure along these lines:
-
-1. `git checkout` the tag of the most recent release on Github
-2. Rebuild all the images and push them
-3. Update the image tags in vals.yml
-4. `aws s3 cp` the secrets bucket in S3 into `.secrets` under the secrets
-subchart in Magma
-5. Upgrade helm deployment with `helm upgrade`
-6. Delete the `.secrets` folder
-
-We've automated steps 4-6 with a fabfile under
-`magma/orc8r/cloud/helm/orc8r/fabfile.py`. You can upgrade your deployment
-using this fabfile like this:
+For example, with the realpath utility
+installed, you can set the kubeconfig with
 
 ```bash
-fab deploy:PATH_TO_VALS_YML,PATH_TO_TERRAFORM_KUBECONFIG,S3_BUCKET_NAME
+export KUBECONFIG=$(realpath kubeconfig_orc8r)
 ```
 
-where `PATH_TO_VALS_YML` is the full path to `vals.yml` on your machine,
-`PATH_TO_TERRAFORM_KUBECONFIG` is the full path to the `kubeconfig_orc8r` file
-produced by Terraform, and `S3_BUCKET_NAME` is the name of the S3 bucket where
-you've uploaded your secrets.
+### Terraform Secrets
+
+From your same root Terraform module, seed the certificates and secrets we
+generated earlier by running
+
+```bash
+$ terraform apply -target=module.orc8r-app.null_resource.orc8r_seed_secrets
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+The secrets should now be successfully uploaded to AWS Secrets Manager.
+
+NOTE: if this isn't your first time applying the `orc8r_seed_secrets` resource,
+you'll need to first
+`terraform taint module.orc8r-app.null_resource.orc8r_seed_secrets`.
+
+### Terraform Application
+
+With the underlying infrastructure and secrets in place, we can now install the
+Orchestrator application.
+
+From your same root Terraform module, install the Orchestrator application
+by running
+
+```bash
+$ terraform apply
+
+Apply complete! Resources: 16 added, 0 changed, 0 destroyed.
+```
+
+### Create an Orchestrator Admin User
+
+The NMS requires some basic certificate-based authentication when making
+calls to the Orchestrator API. To support this, we need to add the relevant
+certificate as an admin user to the controller.
+
+NOTE: in the below `kubectl` commands, use the `-n` flag, or
+[`kubens`](https://github.com/ahmetb/kubectx), to select the appropriate K8s
+namespace (by default this is `orc8r`). Also, assumes kubeconfig is set
+correctly from above.
+
+Create the Orchestrator admin user with the `admin_operator` certificate
+created earlier
+
+```bash
+kubectl --namespace orc8r exec deploy/orc8r-orchestrator -- \
+  /var/opt/magma/bin/accessc \
+  add-existing -admin -cert /var/opt/magma/certs/admin_operator.pem \
+  admin_operator
+```
+
+If you want to verify the admin user was successfully created, inspect the
+output from
+
+```bash
+$ kubectl --namespace orc8r exec deploy/orc8r-orchestrator -- \
+  /var/opt/magma/bin/accessc list-certs
+
+# NOTE: actual values will differ
+Serial Number: 83550F07322CEDCD; Identity: Id_Operator_admin_operator; Not Before: 2020-06-26 22:39:55 +0000 UTC; Not After: 2030-06-24 22:39:55 +0000 UTC
+```
+
+At this point, you can `rm -rf ~/secrets` to remove the certificates from your
+local disk (we recommend this for security). If you ever need to update your
+certificates, you can create this local directory again and `terraform taint`
+the `null_resource` to re-upload local certificates to Secrets Manager. You'll
+also need to add a new admin user with the updated `admin_operator` cert.
+
+### Create an NMS Admin User
+
+Create an admin user for the `host` organization on the NMS
+
+```bash
+kubectl --namespace orc8r exec -it deploy/nms-magmalte -- \
+  yarn setAdminPassword host ADMIN_USER_EMAIL ADMIN_USER_PASSWORD
+```
+
+## DNS Resolution
+
+EKS has been set up with
+[ExternalDNS](https://github.com/kubernetes-sigs/external-dns), so AWS Route53
+will already have the appropriate CNAME records for the relevant subdomains of
+Orchestrator at this point. You will need to configure your DNS records on
+your managed domain name to use the Route53 nameservers in order to resolve
+these subdomains.
+
+The example Terraform root module has an output `nameservers` which will list
+the Route53 nameservers for the hosted zone for Orchestrator. Access these
+via `terraform output` (you have probably already noticed identical output
+from every `terraform apply`). Output should be of the form:
+
+```text
+Outputs:
+
+nameservers = [
+  "ns-xxxx.awsdns-yy.org",
+  "ns-xxxx.awsdns-yy.co.uk",
+  "ns-xxxx.awsdns-yy.com",
+  "ns-xxxx.awsdns-yy.net",
+]
+```
+
+If you chose a subdomain prefix for your Orchestrator domain name in your
+root Terraform module, you only need to provide a single NS record to your
+domain registrar, mapping the subdomain to the above name servers.
+For example, for the subdomain `orc8r`, this record would notionally take
+the form `{ orc8r -> [ns-xxxx.awsdns-yy.org, ...] }`.
+
+If you didn't choose a subdomain prefix, then you can still point the whole
+domain to AWS via the single NS record. Alternatively, if this is undesirable,
+provide NS records for each of the following subdomains
+
+1. nms
+2. controller
+3. bootstrapper-controller
+4. api
+
+For example, for the domain `mydomain`, these records would notionally take
+the form
+`{ nms -> [ns-xxxx.awsdns-yy.org, ...], controller -> [ns-xxxx.awsdns-yy.org, ...], ... }`.
+
+## Verify the Deployment
+
+After a few minutes the NS records should propagate. Confirm successful
+deployment by visiting the host NMS organization at e.g.
+`https://host.nms.yoursubdomain.yourdomain.com` and logging in with the
+`ADMIN_USER_EMAIL` and `ADMIN_USER_PASSWORD` provided above.
+
+NOTE: the `https://` is required. If you self-signed certs above, the browser
+will rightfully complain. Either ignore the browser warnings at your own risk
+(some versions of Chrome won't allow this at all), or e.g.
+[import the root CA from above on a per-browser basis
+](https://stackoverflow.com/questions/7580508/getting-chrome-to-accept-self-signed-localhost-certificate).
+
+For interacting with the Orchestrator REST API, a good starting point is the
+Swagger UI available at `https://api.yoursubdomain.yourdomain.com/swagger/v1/ui/`.
+
+If desired, you can also visit the AWS endpoints directly. The relevant
+services are `nginx-proxy` for NMS and `orc8r-nginx-proxy` for Orchestrator
+API. Remember to include `https://`, as well as the port number for
+non-standard TLS ports.
+
+```bash
+$ kubectl --namespace orc8r get services
+
+# NOTE: values will differ, e.g. the EXTERNAL-IP column
+NAME                            TYPE           CLUSTER-IP       EXTERNAL-IP                       PORT(S)                                                     AGE
+fluentd                         LoadBalancer   172.20.213.111   aaa.us-west-2.elb.amazonaws.com   24224:31621/TCP                                             3h13m
+magmalte                        ClusterIP      172.20.197.108   <none>                            8081/TCP                                                    3h13m
+nginx-proxy                     LoadBalancer   172.20.1.201     www.us-west-2.elb.amazonaws.com   443:32422/TCP                                               3h13m
+orc8r-accessd                   ClusterIP      172.20.128.137   <none>                            9180/TCP                                                    3h13m
+orc8r-alertmanager              ClusterIP      172.20.165.206   <none>                            9093/TCP                                                    3h13m
+orc8r-alertmanager-configurer   ClusterIP      172.20.92.62     <none>                            9101/TCP                                                    3h13m
+orc8r-analytics                 ClusterIP      172.20.152.243   <none>                            9180/TCP                                                    3h13m
+orc8r-bootstrap-nginx           LoadBalancer   172.20.232.199   xxx.us-west-2.elb.amazonaws.com   80:31116/TCP,443:31302/TCP,8444:31093/TCP                   3h13m
+orc8r-bootstrapper              ClusterIP      172.20.65.124    <none>                            9180/TCP                                                    3h13m
+orc8r-certifier                 ClusterIP      172.20.89.150    <none>                            9180/TCP                                                    3h13m
+orc8r-clientcert-nginx          LoadBalancer   172.20.143.232   yyy.us-west-2.elb.amazonaws.com   80:30546/TCP,443:31400/TCP,8443:30781/TCP                   3h13m
+orc8r-configurator              ClusterIP      172.20.56.203    <none>                            9180/TCP                                                    3h13m
+orc8r-ctraced                   ClusterIP      172.20.134.117   <none>                            9180/TCP                                                    3h13m
+orc8r-device                    ClusterIP      172.20.103.126   <none>                            9180/TCP                                                    3h13m
+orc8r-directoryd                ClusterIP      172.20.4.31      <none>                            9180/TCP                                                    3h13m
+orc8r-dispatcher                ClusterIP      172.20.124.178   <none>                            9180/TCP                                                    3h13m
+orc8r-ha                        ClusterIP      172.20.201.112   <none>                            9180/TCP                                                    3h13m
+orc8r-lte                       ClusterIP      172.20.225.103   <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-metricsd                  ClusterIP      172.20.159.39    <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-nginx-proxy               LoadBalancer   172.20.52.234    zzz.us-west-2.elb.amazonaws.com   80:30034/TCP,8443:31884/TCP,8444:31829/TCP,443:30124/TCP    3h13m
+orc8r-obsidian                  ClusterIP      172.20.41.215    <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-orchestrator              ClusterIP      172.20.172.120   <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-policydb                  ClusterIP      172.20.95.10     <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-prometheus                ClusterIP      172.20.65.141    <none>                            9090/TCP                                                    3h13m
+orc8r-prometheus-cache          ClusterIP      172.20.111.91    <none>                            9091/TCP,9092/TCP                                           3h13m
+orc8r-prometheus-configurer     ClusterIP      172.20.106.4     <none>                            9100/TCP                                                    3h13m
+orc8r-service-registry          ClusterIP      172.20.146.78    <none>                            9180/TCP                                                    3h13m
+orc8r-smsd                      ClusterIP      172.20.63.198    <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-state                     ClusterIP      172.20.185.245   <none>                            9180/TCP                                                    3h13m
+orc8r-streamer                  ClusterIP      172.20.57.35     <none>                            9180/TCP                                                    3h13m
+orc8r-subscriberdb              ClusterIP      172.20.238.111   <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-tenants                   ClusterIP      172.20.173.57    <none>                            9180/TCP,8080/TCP                                           3h13m
+orc8r-user-grafana              ClusterIP      172.20.149.141   <none>                            3000/TCP                                                    3h13m
+```
+
+## Upgrade the Deployment
+
+You can upgrade the deployment by changing one or both of the following
+variables in your root Terraform module, before running `terraform apply`
+
+- `orc8r_tag` container image version
+- `orc8r_chart_version` Helm chart version
+
+Changes to the Terraform modules between releases may require some updates to
+your root Terraform module - these will be communicated in release notes.
