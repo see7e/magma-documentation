@@ -66,7 +66,7 @@ AGW need following configuration for WireGuard tunnel
 
 ### **Datapath Programming for WireGuard Tunnel**
 
-![WireGuard datapath in NonNAT setup](assets/agw_wg_tun1.png)
+![WireGuard datapath in NonNAT setup](../assets/agw_wg_tun1.png)
 
 Magma data path programming for WireGuard Tunnel will involve the following steps
 
@@ -133,7 +133,7 @@ Magma data path programming with IPSec will involve the following steps
        for managing the DHCP traffic.
 3. Setup the flows to drive the traffic to/from the tunnel port.
 
-![IPSec datapath in NonNAT setup](assets/agw_ipsec_tun1.png)
+![IPSec datapath in NonNAT setup](../assets/agw_ipsec_tun1.png)
 
 ## **Scope of IPSec Tunnel**
 
@@ -145,7 +145,7 @@ This is the scope for version 1.
 4. Tunnel device would be L3 tunnel
 5. Uplink QoS would not work due to use of skb-mark, IPSec also utilizes
    skb-mark.
-6. IPSec would be only supported on ubuntu and kernel (> 4.14).
+6. IPSec would be only supported on ubuntu and kernel (\> 4.14).
 
 [1] `https://www.wireguard.com/performance/`
-    <https://core.ac.uk/download/pdf/322886318.pdf>
+    \<https://core.ac.uk/download/pdf/322886318.pdf\>
